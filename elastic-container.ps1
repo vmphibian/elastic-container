@@ -145,6 +145,7 @@ function get_host_ip {
                     $ipvar = "0.0.0.0"
                 }
             }
+            return $ipvar
 }
 
 function set_fleet_values {
