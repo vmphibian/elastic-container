@@ -65,7 +65,7 @@ function configure_kbn {
         Write-Host
         Write-Host "Attempting to enable the Detection Engine and install prebuilt Detection Rules."
 
-        if ($STATUS -eq 302 -or $STATUS -eq 200) {
+        if ($STATUS -eq 302) {
             Write-Host
             Write-Host "Kibana is up. Proceeding."
             Write-Host
@@ -82,13 +82,13 @@ function configure_kbn {
             Write-Host
             Write-Host "Prepackaged rules installed!"
             Write-Host
-            if ($LinuxDR -eq 0 -and $WindowsDR -eq 0 -and $MacOSDR -eq 0) {
+            if ($env:LinuxDR -eq 0 -and $env:WindowsDR -eq 0 -and $env:MacOSDR -eq 0) {
                 Write-Host "No detection rules enabled in the .env file, skipping detection rules enablement."
                 Write-Host
                 break
             } else {
                 Write-Host "Enabling detection rules"
-                if ($LinuxDR -eq 1) {
+                if ($env:LinuxDR -eq 1) {
                     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
                         query = "alert.attributes.tags: (""Linux"" OR ""OS: Linux"")";
                         action = "enable"
@@ -96,15 +96,16 @@ function configure_kbn {
                     Write-Host
                     Write-Host "Successfully enabled Linux detection rules"
                 }
-                if ($WindowsDR -eq 1) {
+                if ($env:WindowsDR -eq 1) {
+                    Write-Host "Enabling Windows detection rules"
                     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
                         query = "alert.attributes.tags: (""Windows"" OR ""OS: Windows"")";
                         action = "enable"
-                    } -Compress)
+                    } -Compress) -Verbose
                     Write-Host
                     Write-Host "Successfully enabled Windows detection rules"
                 }
-                if ($MacOSDR -eq 1) {
+                if ($env:MacOSDR -eq 1) {
                     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
                         query = "alert.attributes.tags: (""macOS"" OR ""OS: macOS"")";
                         action = "enable"
