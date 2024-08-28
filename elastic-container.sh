@@ -58,7 +58,7 @@ configure_kbn() {
     echo
     echo "Attempting to enable the Detection Engine and install prebuilt Detection Rules."
 
-    if [ "${STATUS}" == "302" ]; then
+    if [ "${STATUS}" == "302" ] || [ "${STATUS}" == "200" ]; then
       echo
       echo "Kibana is up. Proceeding."
       echo

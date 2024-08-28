@@ -1,3 +1,4 @@
+# Kibana requires a pre-emptive auth when accessing, so with Invoke-RestMethod use `-Authentication Basic` with -Credential to force it in the header
 # Set strict mode
 Set-StrictMode -Version Latest
 
@@ -22,11 +23,11 @@ Get-Content .env | ForEach-Object {
     }
 }
 
-$HEADERS = @(
-    @{ Name = "kbn-version"; Value = $env:STACK_VERSION }
-    @{ Name = "kbn-xsrf"; Value = "kibana" }
-    @{ Name = "Content-Type"; Value = "application/json" }
-)
+$HEADERS = @{
+    "kbn-version" = $env:STACK_VERSION
+    "kbn-xsrf" = "kibana"
+    "Content-Type" = "application/json"
+}
 
 function passphrase_reset {
     if (Select-String -Path .env -Pattern "changeme") {
@@ -60,15 +61,15 @@ function configure_kbn {
     $i = $MAXTRIES
 
     while ($i -gt 0) {
-        $STATUS = (Invoke-WebRequest -Uri $env:LOCAL_KBN_URL -Method Head -UseBasicParsing).StatusCode
+        $STATUS = (Invoke-WebRequest -SkipCertificateCheck -Uri $env:LOCAL_KBN_URL -Method Head -UseBasicParsing).StatusCode
         Write-Host
         Write-Host "Attempting to enable the Detection Engine and install prebuilt Detection Rules."
 
-        if ($STATUS -eq 302) {
+        if ($STATUS -eq 302 -or $STATUS -eq 200) {
             Write-Host
             Write-Host "Kibana is up. Proceeding."
             Write-Host
-            $output = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/index" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+            $output = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/index" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
             if ($output.acknowledged -ne $true) {
                 Write-Host
                 Write-Host "Detection Engine setup failed :-("
@@ -76,7 +77,7 @@ function configure_kbn {
             }
 
             Write-Host "Detection engine enabled. Installing prepackaged rules."
-            Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+            Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential("$env:ELASTIC_USERNAME", (ConvertTo-SecureString "$env:ELASTIC_PASSWORD" -AsPlainText -Force)))
 
             Write-Host
             Write-Host "Prepackaged rules installed!"
@@ -88,26 +89,26 @@ function configure_kbn {
             } else {
                 Write-Host "Enabling detection rules"
                 if ($LinuxDR -eq 1) {
-                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body @{
-                        query = "alert.attributes.tags: (""Linux"" OR ""OS: Linux"")"
+                    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
+                        query = "alert.attributes.tags: (""Linux"" OR ""OS: Linux"")";
                         action = "enable"
-                    }
+                    })
                     Write-Host
                     Write-Host "Successfully enabled Linux detection rules"
                 }
                 if ($WindowsDR -eq 1) {
-                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body @{
-                        query = "alert.attributes.tags: (""Windows"" OR ""OS: Windows"")"
+                    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
+                        query = "alert.attributes.tags: (""Windows"" OR ""OS: Windows"")";
                         action = "enable"
-                    }
+                    } -Compress)
                     Write-Host
                     Write-Host "Successfully enabled Windows detection rules"
                 }
                 if ($MacOSDR -eq 1) {
-                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body @{
-                        query = "alert.attributes.tags: (""macOS"" OR ""OS: macOS"")"
+                    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
+                        query = "alert.attributes.tags: (""macOS"" OR ""OS: macOS"")";
                         action = "enable"
-                    }
+                    })
                     Write-Host
                     Write-Host "Successfully enabled MacOS detection rules"
                 }
@@ -149,42 +150,42 @@ function get_host_ip {
 }
 
 function set_fleet_values {
-    # Get the current Fleet settings
-    $CURRENT_SETTINGS = Invoke-RestMethod -Uri "$env:KIBANA_HOST/api/fleet/agents/setup" -Method Get -Headers @{ "Content-Type" = "application/json" } -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    # Get the current Fleet settings #$env:KIBANA_HOST
+    $CURRENT_SETTINGS = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agents/setup" -Method Get -Headers @{ "Content-Type" = "application/json" } -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
 
     # Check if Fleet is already set up
-    if ($CURRENT_SETTINGS.isInitialized -eq $true) {
+    if ($CURRENT_SETTINGS.isReady -eq $true) {
         Write-Host "Fleet settings are already configured."
         return
     }
 
     Write-Host "Fleet is not initialized, setting up Fleet..."
     
-    $fingerprint = & $COMPOSE exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256 | cut -d "=" -f 2 | tr -d ":"
+    $fingerprint = & $COMPOSE exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256 | ForEach-Object { ($_ -split "=")[1] -replace ":", "" }
     $body = @{
         fleet_server_hosts = @("https://$($ipvar):$($env:FLEET_PORT)")
     }
-    $body | ConvertTo-Json | Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
     $body = @{
         hosts = @("https://$ipvar:9200")
     }
-    $body | ConvertTo-Json | Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
     $body = @{
         ca_trusted_fingerprint = $fingerprint
     }
-    $body | ConvertTo-Json | Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
     $body = @{
         config_yaml = "ssl.verification_mode: certificate"
     }
-    $body | ConvertTo-Json | Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
     $policy_id = @{
         name = "Endpoint Policy"
         description = ""
         namespace = "default"
         monitoring_enabled = @("logs", "metrics")
         inactivity_timeout = 1209600
-    } | ConvertTo-Json | Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty id
-    $pkg_version = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty version
+    } | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty id
+    $pkg_version = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty version
     $body = @{
         name = "Elastic Defend"
         description = ""
@@ -212,17 +213,17 @@ function set_fleet_values {
             version = $pkg_version
         }
     }
-    $body | ConvertTo-Json | Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
 }
 
 function clear_documents {
-    if ((Invoke-RestMethod -Uri "https://$ipvar:9200/_data_stream/logs-*" -Method Delete -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-String -Pattern "true").Count -gt 0) {
+    if ((Invoke-RestMethod -SkipCertificateCheck -Uri "https://$ipvar:9200/_data_stream/logs-*" -Method Delete -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-String -Pattern "true").Count -gt 0) {
         Write-Host "Successfully cleared logs data stream"
     } else {
         Write-Host "Failed to clear logs data stream"
     }
     Write-Host
-    if ((Invoke-RestMethod -Uri "https://$ipvar:9200/_data_stream/metrics-*" -Method Delete -Headers $HEADERS -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-String -Pattern "true").Count -gt 0) {
+    if ((Invoke-RestMethod -SkipCertificateCheck -Uri "https://$ipvar:9200/_data_stream/metrics-*" -Method Delete -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-String -Pattern "true").Count -gt 0) {
         Write-Host "Successfully cleared metrics data stream"
     } else {
         Write-Host "Failed to clear metrics data stream"
