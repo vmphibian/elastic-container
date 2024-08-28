@@ -164,20 +164,22 @@ function set_fleet_values {
     Write-Host "Fleet is not initialized, setting up Fleet..."
     
     $fingerprint = & $COMPOSE exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256 | ForEach-Object { ($_ -split "=")[1] -replace ":", "" }
+    Write-Host "Set Fleet Server hosts"
     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
         fleet_server_hosts = @("https://$($ipvar):$($env:FLEET_PORT)")
     } -Compress)
+    Write-Host "Set hosts"
     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-        hosts = @("https://$ipvar:9200")
+        hosts = @("https://$($ipvar):9200")
     } -Compress)
-    $body = @{
+    Write-Host "Set CA fingerprint"
+    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
         ca_trusted_fingerprint = $fingerprint
-    }
-    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
-    $body = @{
+    } -Compress)
+    Write-Host "Set SSL verification mode"
+    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
         config_yaml = "ssl.verification_mode: certificate"
-    }
-    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    } -Compress)
     $policy_id = @{
         name = "Endpoint Policy"
         description = ""
@@ -186,34 +188,34 @@ function set_fleet_values {
         inactivity_timeout = 1209600
     } | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty id
     $pkg_version = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty version
-    $body = @{
-        name = "Elastic Defend"
-        description = ""
-        namespace = "default"
-        policy_id = $policy_id
-        enabled = $true
+    Write-Host "Set up Elastic Defend package policy"
+    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
+        name = "Elastic Defend";
+        description = "";
+        namespace = "default";
+        policy_id = $policy_id;
+        enabled = $true;
         inputs = @(@{
-            enabled = $true
-            streams = @()
-            type = "ENDPOINT_INTEGRATION_CONFIG"
+            enabled = $true;
+            streams = @();
+            type = "ENDPOINT_INTEGRATION_CONFIG";
             config = @{
                 _config = @{
                     value = @{
-                        type = "endpoint"
+                        type = "endpoint";
                         endpointConfig = @{
                             preset = "EDRComplete"
                         }
                     }
                 }
             }
-        })
+        });
         package = @{
             name = "endpoint"
             title = "Elastic Defend"
             version = $pkg_version
         }
-    }
-    $body | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    } -Compress)
 }
 
 function clear_documents {
