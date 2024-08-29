@@ -57,79 +57,94 @@ flags:
 }
 
 function configure_kbn {
-    $MAXTRIES = 15
-    $i = $MAXTRIES
+    [CmdletBinding()]
+    param(
+        [int]$MaxTries = 15,
+        [int]$RetryInterval = 20
+    )
 
-    while ($i -gt 0) {
-        Start-Sleep -Seconds 20
-        $STATUS = (Invoke-WebRequest -SkipCertificateCheck -Uri $env:LOCAL_KBN_URL -Method Head -UseBasicParsing).StatusCode
-        Write-Host
-        Write-Host "Attempting to enable the Detection Engine and install prebuilt Detection Rules."
+    $headers = @{
+        "kbn-version" = $env:STACK_VERSION
+        "kbn-xsrf" = "kibana"
+        "Content-Type" = "application/json"
+    }
+    $cred = New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))
 
-        if ($STATUS -eq 302 -or $STATUS -eq 200) {
-            Write-Host
-            Write-Host "Kibana is up. Proceeding."
-            Write-Host
-            $output = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/index" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
-            if ($output.acknowledged -ne $true) {
-                Write-Host
-                Write-Host "Detection Engine setup failed :-("
-                exit 1
-            }
-
-            Write-Host "Detection engine enabled. Installing prepackaged rules."
-            Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential("$env:ELASTIC_USERNAME", (ConvertTo-SecureString "$env:ELASTIC_PASSWORD" -AsPlainText -Force)))
-
-            Write-Host
-            Write-Host "Prepackaged rules installed!"
-            Write-Host
-            if ($env:LinuxDR -eq 0 -and $env:WindowsDR -eq 0 -and $env:MacOSDR -eq 0) {
-                Write-Host "No detection rules enabled in the .env file, skipping detection rules enablement."
-                Write-Host
+    for ($i = 1; $i -le $MaxTries; $i++) {
+        Write-Host "Attempt $i of $MaxTries Checking Kibana status..."
+        try {
+            $status = (Invoke-WebRequest -SkipCertificateCheck -Uri $env:LOCAL_KBN_URL -Method Head -UseBasicParsing).StatusCode
+            if ($status -in 200, 302) {
+                Write-Host "Kibana is up. Proceeding with configuration."
                 break
-            } else {
-                Write-Host "Enabling detection rules"
-                if ($env:LinuxDR -eq 1) {
-                    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-                        query = "alert.attributes.tags: (""Linux"" OR ""OS: Linux"")";
-                        action = "enable"
-                    })
-                    Write-Host
-                    Write-Host "Successfully enabled Linux detection rules"
-                }
-                if ($env:WindowsDR -eq 1) {
-                    Write-Host "Enabling Windows detection rules"
-                    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-                        query = "alert.attributes.tags: (`"Windows`" OR `"OS: Windows`")";
-                        action = "enable"
-                    } -Compress)
-                    Write-Host
-                    Write-Host "Successfully enabled Windows detection rules"
-                }
-                if ($env:MacOSDR -eq 1) {
-                    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-                        query = "alert.attributes.tags: (""macOS"" OR ""OS: macOS"")";
-                        action = "enable"
-                    })
-                    Write-Host
-                    Write-Host "Successfully enabled MacOS detection rules"
-                }
             }
-            Write-Host
-            break
-        } else {
-            Write-Host
-            Write-Host "Kibana still loading. Trying again in 40 seconds"
         }
+        catch {
+            Write-Host "Failed to connect to Kibana. Retrying in $RetryInterval seconds."
+        }
+        
+        if ($i -eq $MaxTries) {
+            Write-Host "Exceeded maximum tries ($MaxTries) to setup detection engine."
+            return $false
+        }
+        
+        Start-Sleep -Seconds $RetryInterval
+    }
 
-        Start-Sleep -Seconds 20
-        $i--
+    # Enable Detection Engine
+    try {
+        $output = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/index" -Method Post -Headers $headers -Authentication Basic -Credential $cred
+        if (-not $output.acknowledged) {
+            throw "Detection Engine setup failed."
+        }
+        Write-Host "Detection engine enabled. Installing prepackaged rules."
     }
-    if ($i -eq 0) {
-        Write-Host "Exceeded MAXTRIES ($MAXTRIES) to setup detection engine."
-        exit 1
+    catch {
+        Write-Host "Error enabling Detection Engine: $_"
+        return $false
     }
-    return 0
+
+    # Install prepackaged rules
+    try {
+        Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $headers -Authentication Basic -Credential $cred
+        Write-Host "Prepackaged rules installed successfully."
+    }
+    catch {
+        Write-Host "Error installing prepackaged rules: $_"
+        return $false
+    }
+
+    # Enable specific detection rules based on environment variables
+    $osTypes = @{
+        "LinuxDR" = @("Linux", "OS: Linux")
+        "WindowsDR" = @("Windows", "OS: Windows")
+        "MacOSDR" = @("macOS", "OS: macOS")
+    }
+
+    foreach ($os in $osTypes.Keys) {
+        $envValue = [Environment]::GetEnvironmentVariable($os)
+        if ($envValue -eq "1") {
+            $tags = $osTypes[$os] -join '" OR "'
+            try {
+                Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
+                    query = "alert.attributes.tags: (`"$tags`")"
+                    action = "enable"
+                })
+                Write-Host "Successfully enabled $os detection rules."
+            }
+            catch {
+                Write-Host "Error enabling $os detection rules: $_"
+            }
+        }
+    }
+
+    if (-not ([Environment]::GetEnvironmentVariable("LinuxDR") -eq "1" -or 
+              [Environment]::GetEnvironmentVariable("WindowsDR") -eq "1" -or 
+              [Environment]::GetEnvironmentVariable("MacOSDR") -eq "1")) {
+        Write-Host "No detection rules enabled in the .env file, skipping detection rules enablement."
+    }
+
+    return $true
 }
 
 function get_host_ip {
@@ -152,72 +167,98 @@ function get_host_ip {
 }
 
 function set_fleet_values {
-    # Get the current Fleet settings #$env:KIBANA_HOST
-    $CURRENT_SETTINGS = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agents/setup" -Method Get -Headers @{ "Content-Type" = "application/json" } -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force)))
+    [CmdletBinding()]
+    param()
 
-    # Check if Fleet is already set up
-    if ($CURRENT_SETTINGS.isReady -eq $true) {
+    $headers = @{ "kbn-version" = $env:STACK_VERSION
+                  "kbn-xsrf" = "kibana"
+                  "Content-Type" = "application/json"
+                }
+    $cred = New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))
+
+    # Get the current Fleet settings
+    $currentSettings = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agents/setup" -Method Get -Headers $headers -Authentication Basic -Credential $cred
+
+    if ($currentSettings.isReady) {
         Write-Host "Fleet settings are already configured."
         return
     }
 
     Write-Host "Fleet is not initialized, setting up Fleet..."
     
-    $fingerprint = & $COMPOSE exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256 | ForEach-Object { ($_ -split "=")[1] -replace ":", "" }
-    Write-Host "Set Fleet Server hosts"
-    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-        fleet_server_hosts = @("https://$($ipvar):$($env:FLEET_PORT)")
+    $fingerprint = & $COMPOSE exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | 
+                   openssl x509 -noout -fingerprint -sha256 | 
+                   ForEach-Object { ($_ -split "=")[1] -replace ":", "" }
+
+    $fleetServerHosts = @("https://${ipvar}:$env:FLEET_PORT")
+    $elasticsearchHosts = @("https://${ipvar}:9200")
+
+    # Set Fleet Server hosts
+    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
+        fleet_server_hosts = $fleetServerHosts
     } -Compress)
-    Write-Host "Set hosts"
-    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-        hosts = @("https://$($ipvar):9200")
-    } -Compress)
-    Write-Host "Set CA fingerprint"
-    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
+
+    # Set Elasticsearch hosts and SSL settings
+    $outputSettings = @{
+        hosts = $elasticsearchHosts
         ca_trusted_fingerprint = $fingerprint
-    } -Compress)
-    Write-Host "Set SSL verification mode"
-    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
         config_yaml = "ssl.verification_mode: certificate"
-    } -Compress)
-    $policy_id = @{
+    }
+
+    foreach ($setting in $outputSettings.GetEnumerator()) {
+        Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
+            $setting.Key = $setting.Value
+        } -Compress)
+    }
+
+    # Create Endpoint Policy
+    $policyParams = @{
         name = "Endpoint Policy"
         description = ""
         namespace = "default"
         monitoring_enabled = @("logs", "metrics")
         inactivity_timeout = 1209600
-    } | ConvertTo-Json | Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty id
-    $pkg_version = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-Object -ExpandProperty item | Select-Object -ExpandProperty version
-    Write-Host "Set up Elastic Defend package policy"
-    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -Body (ConvertTo-Json @{
-        name = "Elastic Defend";
-        description = "";
-        namespace = "default";
-        policy_id = $policy_id;
-        enabled = $true;
-        inputs = @(@{
-            enabled = $true;
-            streams = @();
-            type = "ENDPOINT_INTEGRATION_CONFIG";
-            config = @{
-                _config = @{
-                    value = @{
-                        type = "endpoint";
-                        endpointConfig = @{
-                            preset = "EDRComplete"
+    }
+    $policyResponse = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $headers -Authentication Basic -Credential $cred -Body ($policyParams | ConvertTo-Json)
+    $policyId = $policyResponse.item.id
+
+    # Get Endpoint package version
+    $packageResponse = Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $headers -Authentication Basic -Credential $cred
+    $packageVersion = $packageResponse.item.version
+
+    # Set up Elastic Defend package policy
+    $packagePolicyParams = @{
+        name = "Elastic Defend"
+        description = ""
+        namespace = "default"
+        policy_id = $policyId
+        enabled = $true
+        inputs = @(
+            @{
+                enabled = $true
+                streams = @()
+                type = "ENDPOINT_INTEGRATION_CONFIG"
+                config = @{
+                    _config = @{
+                        value = @{
+                            type = "endpoint"
+                            endpointConfig = @{
+                                preset = "EDRComplete"
+                            }
                         }
                     }
                 }
             }
-        });
+        )
         package = @{
             name = "endpoint"
             title = "Elastic Defend"
-            version = $pkg_version
+            version = $packageVersion
         }
-    } -Compress)
-}
+    }
 
+    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $headers -Authentication Basic -Credential $cred -Body ($packagePolicyParams | ConvertTo-Json -Depth 10)
+}
 function clear_documents {
     if ((Invoke-RestMethod -SkipCertificateCheck -Uri "https://$ipvar:9200/_data_stream/logs-*" -Method Delete -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) | Select-String -Pattern "true").Count -gt 0) {
         Write-Host "Successfully cleared logs data stream"
