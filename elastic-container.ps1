@@ -122,15 +122,10 @@ function configure_kbn {
         "MacOSDR" = @("macOS", "OS: macOS")
     }
 
-    Write-Host "OS types: $($osTypes.Keys -join ', ')" #REMOVE
     foreach ($os in $osTypes.Keys) {
         $envValue = [Environment]::GetEnvironmentVariable($os)
-        Write-Host "Value: $envValue" #REMOVE
         if ($envValue -eq "1") {
-            Write-Host "OS key: $os" #REMOVE
-            $tagsArray = $osTypes[$os] #REMOVE
-            Write-Host "Tags test: $($tagsArray -join '" OR "')" #REMOVE
-            $tags = $osTypes[$os] | ForEach-Object { "`"$_`"" } -join ' OR '
+            $tags = ($osTypes[$os] | ForEach-Object { "`"$_`"" }) -join ' OR '
             try {
                 Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
                     query = "alert.attributes.tags: ($tags)"
