@@ -115,6 +115,7 @@ function configure_kbn {
     }
 
     # Enable specific detection rules based on environment variables
+    # pick up here on Friday morning...the OS detectin is not working
     $osTypes = @{
         "LinuxDR" = @("Linux", "OS: Linux")
         "WindowsDR" = @("Windows", "OS: Windows")
