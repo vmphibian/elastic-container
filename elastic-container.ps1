@@ -105,14 +105,14 @@ function configure_kbn {
     }
 
     # Install prepackaged rules
-    try {
-        Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $headers -Authentication Basic -Credential $cred
-        Write-Host "Prepackaged rules installed successfully."
-    }
-    catch {
-        Write-Host "Error installing prepackaged rules: $_"
-        return $false
-    }
+    #try {
+    Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $headers -Authentication Basic -Credential $cred
+    Write-Host "Prepackaged rules installed successfully."
+    #}
+    #catch {
+    #    Write-Host "Error installing prepackaged rules: $_"
+    #    return $false
+    #}
 
     # Enable specific detection rules based on environment variables
     # pick up here on Friday morning...the OS detectin is not working
@@ -122,13 +122,18 @@ function configure_kbn {
         "MacOSDR" = @("macOS", "OS: macOS")
     }
 
+    Write-Host "OS types: $($osTypes.Keys -join ', ')" #REMOVE
     foreach ($os in $osTypes.Keys) {
         $envValue = [Environment]::GetEnvironmentVariable($os)
+        Write-Host "Value: $envValue" #REMOVE
         if ($envValue -eq "1") {
-            $tags = $osTypes[$os] -join '" OR "'
+            Write-Host "OS key: $os" #REMOVE
+            $tagsArray = $osTypes[$os] #REMOVE
+            Write-Host "Tags test: $($tagsArray -join '" OR "')" #REMOVE
+            $tags = $osTypes[$os] | ForEach-Object { "`"$_`"" } -join ' OR '
             try {
                 Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
-                    query = "alert.attributes.tags: (`"$tags`")"
+                    query = "alert.attributes.tags: ($tags)"
                     action = "enable"
                 })
                 Write-Host "Successfully enabled $os detection rules."
