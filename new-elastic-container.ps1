@@ -50,7 +50,7 @@ flags:
     Write-Host $usage
 }
 
-function Configure-Kbn {
+function Config-Kbn {
     $MAXTRIES = 15
     $i = $MAXTRIES
 
@@ -245,7 +245,7 @@ switch ($ACTION) {
         $ipvar = Get-HostIP
         Write-Host "Starting Elastic Stack network and containers."
         Invoke-Expression "$COMPOSE up -d --no-deps"
-        Configure-Kbn
+        Config-Kbn
         Write-Host "Waiting 40 seconds for Fleet Server setup."
         Write-Host ""
         Start-Sleep -Seconds 40
@@ -286,3 +286,5 @@ switch ($ACTION) {
     }
     default {
         Write-Host "Proper syntax not used. See the usage`n"
+    }
+}
