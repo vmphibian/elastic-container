@@ -14,13 +14,11 @@ Get-Content .env | ForEach-Object {
     }
 }
 
-$HEADERS = @(
-    @{
-        "kbn-version" = $env:STACK_VERSION
-        "kbn-xsrf" = "kibana"
-        "Content-Type" = "application/json"
-    }
-)
+$HEADERS = @{
+    "kbn-version" = $env:STACK_VERSION;
+    "kbn-xsrf" = "kibana";
+    "Content-Type" = "application/json";
+}
 
 function Passphrase-Reset {
     if (Select-String -Path ".env" -Pattern "changeme" -Quiet) {
@@ -53,6 +51,7 @@ flags:
 function Config-Kbn {
     $MAXTRIES = 15
     $i = $MAXTRIES
+    $cred = New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))
 
     while ($i -gt 0) {
         $STATUS = (Invoke-WebRequest -Uri $env:LOCAL_KBN_URL -Method Head -SkipCertificateCheck).StatusCode
@@ -63,7 +62,7 @@ function Config-Kbn {
             Write-Host ""
             Write-Host "Kibana is up. Proceeding."
             Write-Host ""
-            $output = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/index" -Method Post -Headers $HEADERS -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+            $output = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/index" -Method Post -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
             if (-not $output.acknowledged) {
                 Write-Host ""
                 Write-Host "Detection Engine setup failed :-("
@@ -71,7 +70,7 @@ function Config-Kbn {
             }
 
             Write-Host "Detection engine enabled. Installing prepackaged rules."
-            Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $HEADERS -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+            Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 
             Write-Host ""
             Write-Host "Prepackaged rules installed!"
@@ -88,7 +87,7 @@ function Config-Kbn {
                         action = "enable"
                     } | ConvertTo-Json
 
-                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Body $body -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Body $body -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
                     Write-Host ""
                     Write-Host "Successfully enabled Linux detection rules"
                 }
@@ -98,7 +97,7 @@ function Config-Kbn {
                         action = "enable"
                     } | ConvertTo-Json
 
-                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Body $body -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Body $body -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
                     Write-Host ""
                     Write-Host "Successfully enabled Windows detection rules"
                 }
@@ -108,7 +107,7 @@ function Config-Kbn {
                         action = "enable"
                     } | ConvertTo-Json
 
-                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Body $body -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+                    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $HEADERS -Body $body -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
                     Write-Host ""
                     Write-Host "Successfully enabled MacOS detection rules"
                 }
@@ -136,7 +135,7 @@ function Get-HostIP {
 }
 
 function Set-FleetValues {
-    $CURRENT_SETTINGS = Invoke-RestMethod -Uri "$env:KIBANA_HOST/api/fleet/agents/setup" -Method Get -Headers $HEADERS -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    $CURRENT_SETTINGS = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/agents/setup" -Method Get -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 
     if ($CURRENT_SETTINGS.isInitialized) {
         Write-Host "Fleet settings are already configured."
@@ -148,16 +147,16 @@ function Set-FleetValues {
     $fingerprint = (docker compose exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256).Split("=")[1].Replace(":", "")
     
     $fleetServerHosts = @{ fleet_server_hosts = @("https://${ipvar}:$env:FLEET_PORT") } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $HEADERS -Body $fleetServerHosts -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $HEADERS -Body $fleetServerHosts -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 
     $hosts = @{ hosts = @("https://${ipvar}:9200") } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Body $hosts -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Body $hosts -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 
     $caFingerprint = @{ ca_trusted_fingerprint = $fingerprint } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Body $caFingerprint -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Body $caFingerprint -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 
     $configYaml = @{ config_yaml = "ssl.verification_mode: certificate" } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Body $configYaml -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/outputs/fleet-default-output" -Method Put -Headers $HEADERS -Body $configYaml -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 
     $policyBody = @{
         name = "Endpoint Policy"
@@ -167,10 +166,10 @@ function Set-FleetValues {
         inactivity_timeout = 1209600
     } | ConvertTo-Json
 
-    $policy = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $HEADERS -Body $policyBody -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    $policy = Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/agent_policies?sys_monitoring=true" -Method Post -Headers $HEADERS -Body $policyBody -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
     $policy_id = $policy.item.id
 
-    $pkgVersion = (Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $HEADERS -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck).item.version
+    $pkgVersion = (Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/epm/packages/endpoint" -Method Get -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck).item.version
 
     $packagePolicyBody = @{
         name = "Elastic Defend"
@@ -202,18 +201,18 @@ function Set-FleetValues {
         }
     } | ConvertTo-Json -Depth 10
 
-    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Body $packagePolicyBody -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    Invoke-RestMethod -Uri "$env:LOCAL_KBN_URL/api/fleet/package_policies" -Method Post -Headers $HEADERS -Body $packagePolicyBody -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
 }
 
 function Clear-Documents {
-    $logsResult = Invoke-RestMethod -Uri "https://${ipvar}:9200/_data_stream/logs-*" -Method Delete -Headers $HEADERS -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    $logsResult = Invoke-RestMethod -Uri "https://${ipvar}:9200/_data_stream/logs-*" -Method Delete -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
     if ($logsResult.acknowledged) {
         Write-Host "Successfully cleared logs data stream"
     } else {
         Write-Host "Failed to clear logs data stream"
     }
 
-    $metricsResult = Invoke-RestMethod -Uri "https://${ipvar}:9200/_data_stream/metrics-*" -Method Delete -Headers $HEADERS -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
+    $metricsResult = Invoke-RestMethod -Uri "https://${ipvar}:9200/_data_stream/metrics-*" -Method Delete -Headers $HEADERS -Authentication Basic -Credential (New-Object PSCredential ($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))) -SkipCertificateCheck
     if ($metricsResult.acknowledged) {
         Write-Host "Successfully cleared metrics data stream"
     } else {
