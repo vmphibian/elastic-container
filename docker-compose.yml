@@ -94,6 +94,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.security.transport.ssl.client_authentication=optional
       - xpack.license.self_generated.type=${LICENSE}
+      - xpack.security.authc.api_key.enabled=true
+      - indices.query.bool.max_clause_count=8192
     mem_limit: ${MEM_LIMIT}
     ulimits:
       memlock:

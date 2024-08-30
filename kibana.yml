@@ -1,6 +1,9 @@
 xpack.encryptedSavedObjects.encryptionKey: "thirty-two-or-more-random-characters"
+xpack.security.encryptionKey: "thirty-two-or-more-random-characters"
+xpack.reporting.encryptionKey: "thirty-two-or-more-random-characters"
+xpack.reporting.roles.enabled: false
 server.host: "0.0.0.0"
-telemetry.enabled: "true"
+telemetry.enabled: false
 xpack.fleet.packages:
   - name: fleet_server
     version: latest

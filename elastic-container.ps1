@@ -70,6 +70,14 @@ function configure_kbn {
     }
     $cred = New-Object PSCredential($env:ELASTIC_USERNAME, (ConvertTo-SecureString $env:ELASTIC_PASSWORD -AsPlainText -Force))
 
+    # 2-minute wait with countdown before the for loop begins
+    Write-Host "Waiting for 2 minutes before starting the configuration..."
+    for ($seconds = 120; $seconds -gt 0; $seconds--) {
+        Write-Host -NoNewline "`rWaiting: $seconds seconds remaining..."
+        Start-Sleep -Seconds 1
+    }
+    Write-Host "`rStarting configuration now..."
+    
     for ($i = 1; $i -le $MaxTries; $i++) {
         Write-Host "Attempt $i of $MaxTries Checking Kibana status..."
         try {
@@ -105,14 +113,14 @@ function configure_kbn {
     }
 
     # Install prepackaged rules
-    #try {
+    try {
     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/prepackaged" -Method Put -Headers $headers -Authentication Basic -Credential $cred
     Write-Host "Prepackaged rules installed successfully."
-    #}
-    #catch {
-    #    Write-Host "Error installing prepackaged rules: $_"
-    #    return $false
-    #}
+    }
+    catch {
+        Write-Host "Error installing prepackaged rules: $_"
+        return $true  # modified to true from false
+    }
 
     # Enable specific detection rules based on environment variables
     # pick up here on Friday morning...the OS detectin is not working
@@ -126,9 +134,10 @@ function configure_kbn {
         $envValue = [Environment]::GetEnvironmentVariable($os)
         if ($envValue -eq "1") {
             $tags = ($osTypes[$os] | ForEach-Object { "`"$_`"" }) -join ' OR '
+            $queryString = "alert.attributes.tags: ($tags)"
             try {
                 Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/detection_engine/rules/_bulk_action" -Method Post -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
-                    query = "alert.attributes.tags: ($tags)"
+                    query = $queryString;
                     action = "enable"
                 })
                 Write-Host "Successfully enabled $os detection rules."
@@ -192,7 +201,7 @@ function set_fleet_values {
                    ForEach-Object { ($_ -split "=")[1] -replace ":", "" }
 
     $fleetServerHosts = @("https://${ipvar}:$env:FLEET_PORT")
-    $elasticsearchHosts = @("https://${ipvar}:9200")
+   $elasticsearchHosts = @("https://${ipvar}:9200")
 
     # Set Fleet Server hosts
     Invoke-RestMethod -SkipCertificateCheck -Uri "$env:LOCAL_KBN_URL/api/fleet/settings" -Method Put -Headers $headers -Authentication Basic -Credential $cred -Body (ConvertTo-Json @{
