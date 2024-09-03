@@ -130,7 +130,7 @@ function Config-Kbn {
 }
 
 function Get-HostIP {
-    $ipvar = (Get-NetIPAddress | Where-Object { $_.AddressFamily -eq 'IPv4' -and $_.IPAddress -notmatch '^(127\.|169\.254\.)' } | Select-Object -First 1).IPAddress
+    $ipvar = (Get-NetIPAddress | Where-Object { $_.AddressFamily -eq 'IPv4' -and $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.InterfaceAlias -match '^Ethernet' } | Select-Object -First 1).IPAddress
     return $ipvar
 }
 
