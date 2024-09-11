@@ -22,11 +22,11 @@ If you're interested in more details regarding this project and what to do once 
 
 ## Requirements
 
-### Operating System: 
+### Operating System
 
 - Linux or MacOS 
 
-### Prerequisites: 
+### Prerequisites
 
 - [Docker suite](https://docs.docker.com/get-docker/), [jq](https://stedolan.github.io/jq/download/), [curl](https://curl.se/download.html), and [git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 
